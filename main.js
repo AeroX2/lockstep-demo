@@ -20,7 +20,7 @@ var latency = 5;
 
 var unreliableConn;
 var player2;
-var player2buffer = {}
+var player2buffer = []
 var player2bufferfilled = false;
 
 function connectionOpened(conn) {
@@ -40,6 +40,7 @@ function connectionOpened(conn) {
 	} else {
       conn.on('data', function(data) {
         //console.log('Received', data);
+        //console.log('Length', player2buffer.length);
 		
 		//Discard old packets
 		if (data.frame < simulationFrame) return;
@@ -49,13 +50,13 @@ function connectionOpened(conn) {
 		  networkinputbuffer = networkinputbuffer.slice(data.ack, networkinputbuffer.length-1)
 		}
 
-		player2buffer[data.frame] = data;
-		//player2buffer.sort((a,b) => a.frame - b.frame)
+		if (!player2buffer.map(x => x.frame).includes(data.frame)) player2buffer.push(data); //[data.frame] = data;
+		player2buffer.sort((a,b) => a.frame - b.frame)
 
-		if (Object.keys(player2buffer).length > latency) player2bufferfilled = true;
+		if (player2buffer.length > latency) player2bufferfilled = true;
 
 		//Dirty hack, to find the first break in the integer sequence
-		for (var i = simulationFrame; i < simulationFrame+Object.keys(player2buffer).length; i++) {
+		for (var i = simulationFrame; i < simulationFrame+player2buffer.length; i++) {
           if (player2buffer[i] == undefined) break;
 		}
 
@@ -99,7 +100,7 @@ var inputbufferfilled = false;
 function gameLoop() {
   setTimeout(() => {
     //console.log('Game loop');
-	console.log('Network buffer: ' + Object.keys(player2buffer).length);
+	//console.log('Network buffer: ' + Object.keys(player2buffer).length);
 
     input.frame++;
 	let input_clone = Object.assign({}, input);
@@ -132,10 +133,10 @@ function gameLoop() {
       //debugger;
       
       firstLocal = gameinputbuffer[0]
-      firstRemote = player2buffer[simulationFrame]
+      firstRemote = player2buffer[0]
       if (firstLocal && firstRemote && firstLocal.frame === firstRemote.frame) {
 		gameinputbuffer.shift();
-        delete player2buffer[simulationFrame]
+        player2buffer.shift();
         simulationFrame++;
       
         //console.log('Playing game for frame: ' + firstLocal.frame)
@@ -169,19 +170,50 @@ function simulateGame(i1, i2) {
   player.x += player1vel.x;
   player.y += player1vel.y;
 
-  if (player.x < 0) player.x = 0;
-  if (player.x > 800-20) player.x = 800-20;
-  if (player.y < 0) player.y = 0;
-  if (player.y > 700-20) player.y = 700-20;
+  if (player.x < 0) {
+	  player.x = 0;
+	  player1vel.x = 0;
+	  player1vel.y = 0;
+  }
+  if (player.x > 800-20) {
+	  player.x = 800-20;
+	  player1vel.x = 0;
+	  player1vel.y = 0;
+  }
+  if (player.y < 0) {
+	  player.y = 0;
+	  player1vel.x = 0;
+	  player1vel.y = 0;
+  }
+  if (player.y > 700-20) {
+	  player.y = 700-20;
+	  player1vel.x = 0;
+	  player1vel.y = 0;
+  }
 
   player2.x += player2vel.x;
   player2.y += player2vel.y;
 
-  if (player2.x < 0) player2.x = 0;
-  if (player2.x > 800-20) player2.x = 800-20;
-  if (player2.y < 0) player2.y = 0;
-  if (player2.y > 700-20) player2.y = 700-20;
-
+  if (player2.x < 0) {
+	  player2.x = 0;
+	  player2vel.x = 0;
+	  player2vel.y = 0;
+  }
+  if (player2.x > 800-20) {
+	  player2.x = 800-20;
+	  player2vel.x = 0;
+	  player2vel.y = 0;
+  }
+  if (player2.y < 0) {
+	  player2.y = 0;
+	  player2vel.x = 0;
+	  player2vel.y = 0;
+  }
+  if (player2.y > 700-20) {
+	  player2.y = 700-20;
+	  player2vel.x = 0;
+	  player2vel.y = 0;
+  }
 
   ctx.fillStyle = 'green';
   ctx.fillRect(player.x, player.y, 20, 20); 
