@@ -25,61 +25,78 @@ var player2bufferfilled = false;
 
 function connectionOpened(conn) {
   conn.on('open', function() {
-	console.log('Connection opened');
+    console.log('Connection opened');
 
     // Receive messages
-	if (conn.reliable) {
+    if (conn.reliable) {
       conn.on('data', function(data) {
         console.log('Received', data);
-		if (data == 'start') {
-		  setupGame(conn)
-		} else {
-		  player2 = data
-		}
+        if (data == 'start') {
+          setupGame(conn)
+        } else {
+          player2 = data
+        }
       });
-	} else {
+    } else {
       conn.on('data', function(data) {
         //console.log('Received', data);
         //console.log('Length', player2buffer.length);
-		
-		//Discard old packets
-		if (data.frame < simulationFrame) return;
 
-		//TODO: Might not be fully correct, gmae could lag behind network
-		if (data.ack !== -1) {
-		  networkinputbuffer = networkinputbuffer.slice(data.ack, networkinputbuffer.length-1)
-		}
+        //Discard old packets
+        if (data.frame < simulationFrame) return;
 
-		if (!player2buffer.map(x => x.frame).includes(data.frame)) player2buffer.push(data); //[data.frame] = data;
-		player2buffer.sort((a,b) => a.frame - b.frame)
+        //TODO: Might not be fully correct, game could lag behind network
+        if (data.ack !== -1) {
+          networkinputbuffer = networkinputbuffer.slice(data.ack, networkinputbuffer.length-1)
+        }
 
-		if (player2buffer.length > latency) player2bufferfilled = true;
+        if (!player2buffer.map(x => x.frame).includes(data.frame)) player2buffer.push(data); //[data.frame] = data;
+        player2buffer.sort((a,b) => a.frame - b.frame)
 
-		//Dirty hack, to find the first break in the integer sequence
-		for (var i = simulationFrame; i < simulationFrame+player2buffer.length; i++) {
+        if (player2buffer.length > latency) player2bufferfilled = true;
+
+        //Dirty hack, to find the first break in the integer sequence
+        for (var i = simulationFrame; i < simulationFrame+player2buffer.length; i++) {
           if (player2buffer[i] == undefined) break;
-		}
+        }
 
-		////The first break in the sequence is all the data the other side can discard
-		input.ack = i-1;
-		//console.log("ACK: "+ input.ack)
+        ////The first break in the sequence is all the data the other side can discard
+        input.ack = i-1;
+        //console.log("ACK: "+ input.ack)
       });
-	}
-  
+    }
+
     // Send messages
     let sendButton = document.getElementById('send-button');
-	if (conn.reliable) {
+    if (conn.reliable) {
       sendButton.addEventListener('click', () => {
         setupGame(conn);
-		conn.send('start');
+        conn.send('start');
       });
-	} else {
+    } else {
       unreliableConn = conn;
-	}
+    }
   });
 }
 
-var player = {x: 0, y: 0}
+var ballRadius = 20;
+
+var br = ballRadius;
+var sp = 2;
+var balls = [{x: 400, y: 250, vx:0, vy:0}]
+balls.push({x: balls[0].x-br-sp,     y: balls[0].y-br*2, vx:0, vy:0})
+balls.push({x: balls[0].x+br+sp,     y: balls[0].y-br*2, vx:0, vy:0})
+
+balls.push({x: balls[0].x-br*2-sp,   y: balls[0].y-br*4, vx:0, vy:0})
+balls.push({x: balls[0].x,           y: balls[0].y-br*4, vx:0, vy:0})
+balls.push({x: balls[0].x+br*2+sp,   y: balls[0].y-br*4, vx:0, vy:0})
+
+balls.push({x: balls[0].x-br-sp,     y: balls[0].y-br*6, vx:0, vy:0})
+balls.push({x: balls[0].x-br*3-sp*2, y: balls[0].y-br*6, vx:0, vy:0})
+balls.push({x: balls[0].x+br+sp,     y: balls[0].y-br*6, vx:0, vy:0})
+balls.push({x: balls[0].x+br*3+sp*2, y: balls[0].y-br*6, vx:0, vy:0})
+
+var player = {x: 0, y: 0, vx: 0, vy: 0}
 var ctx;
 function setupGame(conn) {
   console.log('Setting up game');
@@ -100,45 +117,44 @@ var inputbufferfilled = false;
 function gameLoop() {
   setTimeout(() => {
     //console.log('Game loop');
-	//console.log('Network buffer: ' + Object.keys(player2buffer).length);
+    //console.log('Network buffer: ' + Object.keys(player2buffer).length);
 
     input.frame++;
-	let input_clone = Object.assign({}, input);
+    let input_clone = Object.assign({}, input);
     gameinputbuffer.push(input_clone)
     networkinputbuffer.push(input_clone)
-	if (gameinputbuffer.length > latency) inputbufferfilled = true;
+    if (gameinputbuffer.length > latency) inputbufferfilled = true;
 
-	if (!inputbufferfilled) {
+    if (!inputbufferfilled) {
       window.requestAnimationFrame(gameLoop);
       return;
-	}
+    }
 
     let waitingLoop = () => {
       //console.log('Waiting');
-      
+
       //Reduntantly send all inputs
       for (let inputz of networkinputbuffer) {
         //TODO: Figure out when to remove old packets from inputbuffer
-        //if (inputz.frame
         unreliableConn.send(inputz)
       }
-      
+
       if (!player2bufferfilled) {
         setTimeout(() => {
           waitingLoop();
         }, 50);
-      	return;
+        return;
       }
-      
+
       //debugger;
-      
+
       firstLocal = gameinputbuffer[0]
       firstRemote = player2buffer[0]
       if (firstLocal && firstRemote && firstLocal.frame === firstRemote.frame) {
-		gameinputbuffer.shift();
+        gameinputbuffer.shift();
         player2buffer.shift();
         simulationFrame++;
-      
+
         //console.log('Playing game for frame: ' + firstLocal.frame)
         simulateGame(firstLocal, firstRemote);
         window.requestAnimationFrame(gameLoop);
@@ -146,7 +162,7 @@ function gameLoop() {
       }
 
       setTimeout(() => {
-    	waitingLoop();
+        waitingLoop();
       }, 50);
     }
     waitingLoop();
@@ -154,71 +170,115 @@ function gameLoop() {
   }, 1000/60)
 }
 
-var player1vel = {x: 0, y: 0};
-var player2vel = {x: 0, y: 0};
 function simulateGame(i1, i2) {
-  if (i1.left)  player1vel.x -= 0.5;
-  if (i1.right) player1vel.x += 0.5;
-  if (i1.up)    player1vel.y -= 0.5;
-  if (i1.down)  player1vel.y += 0.5;
-                                 
-  if (i2.left)  player2vel.x -= 0.5;
-  if (i2.right) player2vel.x += 0.5;
-  if (i2.up)    player2vel.y -= 0.5;
-  if (i2.down)  player2vel.y += 0.5;
+  if (i1.left)  player.vx -= 0.5;
+  if (i1.right) player.vx += 0.5;
+  if (i1.up)    player.vy -= 0.5;
+  if (i1.down)  player.vy += 0.5;
 
-  player.x += player1vel.x;
-  player.y += player1vel.y;
+  if (i2.left)  player2.vx -= 0.5;
+  if (i2.right) player2.vx += 0.5;
+  if (i2.up)    player2.vy -= 0.5;
+  if (i2.down)  player2.vy += 0.5;
 
-  if (player.x < 0) {
-	  player.x = 0;
-	  player1vel.x = 0;
-	  player1vel.y = 0;
-  }
-  if (player.x > 800-20) {
-	  player.x = 800-20;
-	  player1vel.x = 0;
-	  player1vel.y = 0;
-  }
-  if (player.y < 0) {
-	  player.y = 0;
-	  player1vel.x = 0;
-	  player1vel.y = 0;
-  }
-  if (player.y > 700-20) {
-	  player.y = 700-20;
-	  player1vel.x = 0;
-	  player1vel.y = 0;
+  let update = (ball) => {
+    ball.x += ball.vx;
+    ball.y += ball.vy;
+
+    ball.vx *= 0.995;
+    ball.vy *= 0.995;
+
+    if (ball.x < ballRadius) {
+      ball.x = ballRadius;
+      ball.vx = -ball.vx*0.9;
+    }
+    if (ball.x > 800-ballRadius) {
+      ball.x = 800-ballRadius;
+      ball.vx = -ball.vx*0.9;
+    }
+    if (ball.y < ballRadius) {
+      ball.y = ballRadius;
+      ball.vy = -ball.vy*0.9;
+    }
+    if (ball.y > 700-ballRadius) {
+      ball.y = 700-ballRadius;
+      ball.vy = -ball.vy*0.9;
+    }
   }
 
-  player2.x += player2vel.x;
-  player2.y += player2vel.y;
+  let collision = (b1, b2) => {
+    let dx = b2.x-b1.x;
+    let dy = b2.y-b1.y;
+    let distance = Math.sqrt(dx*dx+dy*dy);
+    if (distance < 2*ballRadius) {
+      let normalx = dx/distance;
+      let normaly = dy/distance;
 
-  if (player2.x < 0) {
-	  player2.x = 0;
-	  player2vel.x = 0;
-	  player2vel.y = 0;
+      let midx = (b1.x+b2.x)/2
+      let midy = (b1.y+b2.y)/2
+      b1.x = midx - normalx * ballRadius;
+      b1.y = midy - normaly * ballRadius;
+      b2.x = midx + normalx * ballRadius;
+      b2.y = midy + normaly * ballRadius;
+
+      let vdx = b1.vx-b2.vx;
+      let vdy = b1.vy-b2.vy;
+
+      let dot = vdx*normalx+vdy*normaly
+      let dvx = dot*normalx;
+      let dvy = dot*normaly;
+
+      b1.vx -= dvx;
+      b1.vy -= dvy;
+      b2.vx += dvx;
+      b2.vy += dvy;
+    }
   }
-  if (player2.x > 800-20) {
-	  player2.x = 800-20;
-	  player2vel.x = 0;
-	  player2vel.y = 0;
+
+  update(player);
+  update(player2);
+
+  for (let ball of balls) {
+    for (let other_ball of balls) {
+      if (ball === other_ball) continue;
+
+      collision(ball, other_ball);
+    }
+
+    collision(ball, player);
+    collision(ball, player2);
+
+    update(ball);
   }
-  if (player2.y < 0) {
-	  player2.y = 0;
-	  player2vel.x = 0;
-	  player2vel.y = 0;
-  }
-  if (player2.y > 700-20) {
-	  player2.y = 700-20;
-	  player2vel.x = 0;
-	  player2vel.y = 0;
-  }
+
+
+  ctx.clearRect(0,0,800,700);
 
   ctx.fillStyle = 'green';
-  ctx.fillRect(player.x, player.y, 20, 20); 
-  ctx.fillRect(player2.x, player2.y, 20, 20); 
+  ctx.beginPath();
+  ctx.arc(player.x, player.y, ballRadius, 0, 2*Math.PI); 
+  ctx.fill();
+
+  ctx.fillStyle = 'red';
+  ctx.beginPath();
+  ctx.arc(player2.x, player2.y, ballRadius, 0, 2*Math.PI); 
+  ctx.fill();
+
+  ctx.fillStyle = 'blue';
+  for (let ball of balls) {
+    ctx.beginPath();
+    ctx.arc(ball.x, ball.y, ballRadius, 0, 2*Math.PI); 
+    ctx.fill();
+  }
 }
+
+////TODO: Remove this
+//player2 = {x:0, y:0, vx: 0, vy: 0}
+//var conn = {
+//  send: () => {}
+//}
+//setupGame(conn);
+//simulateGame({},{});
 
 var input = {
   'ack': -1,
