@@ -10,18 +10,22 @@ peer.on('connection', connectionOpened);
 let connectButton = document.getElementById('connect-button');
 connectButton.addEventListener('click', () => {
   let textbox = document.getElementById('textbox');
-  let conn = peer.connect(textbox.value);
+
+  let conn = peer.connect(textbox.value, { reliable: true });
   connectionOpened(conn)
-  conn = peer.connect(textbox.value, { reliable: true });
+
+  //TODO Find a way to confirm the UDP connection
+  conn = peer.connect(textbox.value);
   connectionOpened(conn)
 });
 
 var latency = 5;
 
-var unreliableConn;
-var player2;
-var player2buffer = []
-var player2bufferfilled = false;
+var unreliableConns = {};
+var other_players = {};
+var other_player_buffers = {}
+var other_player_acks = {}
+var other_buffers_filled = {};
 
 function connectionOpened(conn) {
   conn.on('open', function() {
@@ -32,9 +36,11 @@ function connectionOpened(conn) {
       conn.on('data', function(data) {
         console.log('Received', data);
         if (data == 'start') {
+		  other_players_buffers[conn.peer] = []
+		  other_buffers_filled[conn.peer] = false;
           setupGame(conn)
         } else {
-          player2 = data
+		  other_players[conn.peer] = data
         }
       });
     } else {
@@ -47,34 +53,36 @@ function connectionOpened(conn) {
 
         //TODO: Might not be fully correct, game could lag behind network
         if (data.ack !== -1) {
+          //TODO: Get the lowest ack
           networkinputbuffer = networkinputbuffer.slice(data.ack, networkinputbuffer.length-1)
         }
 
-        if (!player2buffer.map(x => x.frame).includes(data.frame)) player2buffer.push(data); //[data.frame] = data;
-        player2buffer.sort((a,b) => a.frame - b.frame)
+		let buffer = other_player_buffers[conn.peer]
+        if (!buffer.map(x => x.frame).includes(data.frame)) buffer.push(data); //[data.frame] = data;
+        buffer.sort((a,b) => a.frame - b.frame)
 
-        if (player2buffer.length > latency) player2bufferfilled = true;
+        if (buffer.length > latency) other_buffers_filled[conn.peer] = true;
 
         //Dirty hack, to find the first break in the integer sequence
-        for (var i = simulationFrame; i < simulationFrame+player2buffer.length; i++) {
-          if (player2buffer[i] == undefined) break;
+        for (var i = simulationFrame; i < simulationFrame+buffer.length; i++) {
+          if (buffer[i] == undefined) break;
         }
 
         ////The first break in the sequence is all the data the other side can discard
-        input.ack = i-1;
+		other_player_acks[conn.peer] = i-1;
         //console.log("ACK: "+ input.ack)
       });
     }
 
     // Send messages
-    let sendButton = document.getElementById('send-button');
     if (conn.reliable) {
+      let sendButton = document.getElementById('send-button');
       sendButton.addEventListener('click', () => {
         setupGame(conn);
         conn.send('start');
       });
     } else {
-      unreliableConn = conn;
+      unreliableConns[conn.peer] = conn;
     }
   });
 }
@@ -136,7 +144,8 @@ function gameLoop() {
       //Reduntantly send all inputs
       for (let inputz of networkinputbuffer) {
         //TODO: Figure out when to remove old packets from inputbuffer
-        unreliableConn.send(inputz)
+
+		for (let connection of Object.values(unreliableConns)) unreliableConn.send(inputz)
       }
 
       if (!player2bufferfilled) {
@@ -146,17 +155,26 @@ function gameLoop() {
         return;
       }
 
-      //debugger;
-
       firstLocal = gameinputbuffer[0]
-      firstRemote = player2buffer[0]
-      if (firstLocal && firstRemote && firstLocal.frame === firstRemote.frame) {
-        gameinputbuffer.shift();
-        player2buffer.shift();
-        simulationFrame++;
+	  let other_buffers = Object.values(other_player_buffers)
 
-        //console.log('Playing game for frame: ' + firstLocal.frame)
-        simulateGame(firstLocal, firstRemote);
+      let receivedAllInput = false;
+	  if (firstLocal) {
+        receivedAllInput = true;
+        for (let buffer of other_buffers) {
+          if (buffer.frame !== firstLocal.frame) {
+            receivedAllInput = false;
+            break;
+          }
+        }
+	  }
+
+      if (receivedAllInput) {
+        gameinputbuffer.shift();
+		for (let buffer of other_buffers) buffer.shift();
+
+        simulationFrame++;
+        simulateGame(firstLocal, other_buffers);
         window.requestAnimationFrame(gameLoop);
         return;
       }
@@ -170,16 +188,20 @@ function gameLoop() {
   }, 1000/60)
 }
 
-function simulateGame(i1, i2) {
+function simulateGame(i1, other_inputs) {
   if (i1.left)  player.vx -= 0.5;
   if (i1.right) player.vx += 0.5;
   if (i1.up)    player.vy -= 0.5;
   if (i1.down)  player.vy += 0.5;
 
-  if (i2.left)  player2.vx -= 0.5;
-  if (i2.right) player2.vx += 0.5;
-  if (i2.up)    player2.vy -= 0.5;
-  if (i2.down)  player2.vy += 0.5;
+  for (let entry of Object.entries(other_inputs)) {
+	let i = entry.value
+	let other_player = other_players[entry.key]
+    if (i.left)  other_player.vx -= 0.5;
+    if (i.right) other_player.vx += 0.5;
+    if (i.up)    other_player.vy -= 0.5;
+    if (i.down)  other_player.vy += 0.5;
+  }
 
   let update = (ball) => {
     ball.x += ball.vx;
@@ -235,9 +257,11 @@ function simulateGame(i1, i2) {
     }
   }
 
+  // Update the players
   update(player);
-  update(player2);
+  for (let other_player of Object.values(other_players)) update(other_player);
 
+  // Collision checks
   for (let ball of balls) {
     for (let other_ball of balls) {
       if (ball === other_ball) continue;
@@ -246,12 +270,12 @@ function simulateGame(i1, i2) {
     }
 
     collision(ball, player);
-    collision(ball, player2);
+	for (let other_player of Object.values(other_players)) collision(ball, other_player);
 
     update(ball);
   }
 
-
+  // Drawing code
   ctx.clearRect(0,0,800,700);
 
   ctx.fillStyle = 'green';
@@ -260,9 +284,11 @@ function simulateGame(i1, i2) {
   ctx.fill();
 
   ctx.fillStyle = 'red';
-  ctx.beginPath();
-  ctx.arc(player2.x, player2.y, ballRadius, 0, 2*Math.PI); 
-  ctx.fill();
+  for (let other_player of Object.values(other_players)) {
+    ctx.beginPath();
+    ctx.arc(other_player.x, other_player.y, ballRadius, 0, 2*Math.PI); 
+    ctx.fill();
+  }
 
   ctx.fillStyle = 'blue';
   for (let ball of balls) {
@@ -281,7 +307,6 @@ function simulateGame(i1, i2) {
 //simulateGame({},{});
 
 var input = {
-  'ack': -1,
   'frame': -1,
   'up': false,
   'down': false,
