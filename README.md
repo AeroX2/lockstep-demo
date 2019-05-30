@@ -1,2 +1,2 @@
 # Networked Physics (Deterministic lockstep)
-Really quick and DIIIIIIIIRRRRRRRRTTTTTTTYYYYYY example of lockstep deterministic physics networking.
+Really quick and hasty example of lockstep deterministic physics networking.
